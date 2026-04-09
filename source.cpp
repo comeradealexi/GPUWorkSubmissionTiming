@@ -3,6 +3,7 @@
 #include <fstream>
 #include <vector>
 #include <format>
+#include <chrono>
 //#include <vulkan/vulkan.hpp>
 #include <wrl/client.h>
 using namespace Microsoft::WRL;
@@ -29,7 +30,7 @@ enum GPUTimestamps : UINT64 { AllGPUWork, UploadToGPU, GPUToGPU, GPUToReadBack, 
 #define CheckHR(x) { HRESULT _hr = x; if (FAILED(_hr)) { std::cout<< "HR FAILURE\n"; return; } }
 void CopyResource(GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, ComPtr<ID3D12GraphicsCommandList> CommandList, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
 {
-	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (Timestamp * 2) + 0);
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 0));
 
 	{ // Barriers
 		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2] =
@@ -49,8 +50,10 @@ void CopyResource(GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, Co
 		CommandList->ResourceBarrier(2, ResourceBarriers);
 	}
 
-	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (Timestamp * 2) + 1);
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 1));
 }
+
+const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::seconds(10);
 
 int main()
 {
@@ -58,36 +61,14 @@ int main()
 	d3d12();
 }
 
-void d3d12()
+void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize)
 {
-
-#ifdef _DEBUG
-	// Enable the D3D12 debug layer.
-	{
-		ComPtr<ID3D12Debug> debugController;
-		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
-		{
-			debugController->EnableDebugLayer();
-		}
-	}
-#endif
-
-	ComPtr<ID3D12Device> Device;
-	CheckHR(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&Device)));
-
-	D3D12_FEATURE_DATA_ARCHITECTURE1 DataArchitecture1 = {};
-	CheckHR(Device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &DataArchitecture1, sizeof(DataArchitecture1)));
-
 	ComPtr<ID3D12Resource> GPUMemoryA;
 	ComPtr<ID3D12Resource> GPUMemoryB;
 	ComPtr<ID3D12Resource> UploadMemory;
 	ComPtr<ID3D12Resource> ReadbackMemory;
 	ComPtr<ID3D12Resource> QueryReadbackMemory;
-	UINT64 GPUBufferSize = 1024 * 1024 * 4;
-	std::cout << "UMA: " << DataArchitecture1.UMA << "\n";
-	std::cout << "CacheCoherentUMA: " << DataArchitecture1.CacheCoherentUMA << "\n";
-	std::cout << "IsolatedMMU: " << DataArchitecture1.IsolatedMMU << "\n";
-	std::cout << "GPU Buffer Size: " << GPUBufferSize << "\n";
+	const float GPUBuffer1GBRatio = float(1024 * 1024 * 1024) / float(GPUBufferSize);
 	{
 		CD3DX12_HEAP_PROPERTIES GPUHeapProperties(D3D12_HEAP_TYPE_DEFAULT);
 		CD3DX12_HEAP_PROPERTIES UploadHeapProperties(D3D12_HEAP_TYPE_UPLOAD);
@@ -101,7 +82,7 @@ void d3d12()
 
 	{
 		CD3DX12_HEAP_PROPERTIES ReadbackHeapProperties(D3D12_HEAP_TYPE_READBACK);
-		CD3DX12_RESOURCE_DESC QueryResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(1024*1024);
+		CD3DX12_RESOURCE_DESC QueryResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(1024 * 1024);
 		CheckHR(Device->CreateCommittedResource(&ReadbackHeapProperties, D3D12_HEAP_FLAG_NONE, &QueryResourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&QueryReadbackMemory)));
 	}
 
@@ -114,7 +95,7 @@ void d3d12()
 	CommandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 	CheckHR(Device->CreateCommandQueue(&CommandQueueDesc, IID_PPV_ARGS(&CommandQueue)));
 	CheckHR(Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&CommandAllocator)));
-	CheckHR(Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&CommandList)));	
+	CheckHR(Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&CommandList)));
 
 	LARGE_INTEGER CPUFrequency;
 	QueryPerformanceFrequency(&CPUFrequency);
@@ -144,15 +125,16 @@ void d3d12()
 	Average GPUCopyGPUToReadback;
 
 
+	const UINT64 RunCount = 64;
 	UINT64 FenceValueExpected = 0;
 	while (true)
 	{
-		if (FenceValueExpected == 1024 * 32)
+		if (FenceValueExpected == RunCount)
 			break;
 
 		FenceValueExpected++;
 		Fence->SetEventOnCompletion(FenceValueExpected, CPUEvent);
-		
+
 		// Command List Recording
 		{
 			CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (GPUTimestamps::AllGPUWork * 2) + 0);
@@ -215,7 +197,7 @@ void d3d12()
 		}
 		QueryReadbackMemory->Unmap(0, nullptr);
 	}
-	std::cout << "Timing Results:\n";
+	std::cout << std::format("\nTiming Results: ({} - {} KiB)\n", GPUBufferSize, GPUBufferSize / 1024);
 	std::cout << "CPU Submission Time (us): " << (static_cast<float>((CPUTimeSubmission.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
 	std::cout << "CPU Fence Wait  (us): " << (static_cast<float>((CPUTimeFenceWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
 	std::cout << "CPU Before Submission To After Signal Wait (us): " << (static_cast<float>((CPUTimePreSubToAfterWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
@@ -223,10 +205,50 @@ void d3d12()
 	std::cout << "CPU Submission to GPU Started (us): " << (static_cast<float>((CPUSubmissionToGPUStarted.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
 	std::cout << "CPU Submission to GPU Ended (us): " << (static_cast<float>((CPUSubmissionToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
 	std::cout << "GPU Started To GPU Ended (us): " << (static_cast<float>((GPUStartedToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
-	std::cout << "GPU Copy Upload To GPU (us): " << (static_cast<float>((GPUCopyUploadToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
-	std::cout << "GPU Copy GPU To GPU (us): " << (static_cast<float>((GPUCopyGPUToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
-	std::cout << "GPU Copy GPU To Readback (us): " << (static_cast<float>((GPUCopyGPUToReadback.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
 
+	float CopyUploadToGPUTime = (static_cast<float>((GPUCopyUploadToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
+	float CopyUploadToGPUGBs = 1000000.0f / (CopyUploadToGPUTime * GPUBuffer1GBRatio);
+	std::cout << "GPU Copy Upload To GPU (us): " << CopyUploadToGPUTime << " (" << CopyUploadToGPUGBs << "GiB/s)" << "\n";
+
+	float CopyGPUToGPUTime = (static_cast<float>((GPUCopyGPUToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
+	float CopyGPUToGPUGBs = 1000000.0f / (CopyGPUToGPUTime * GPUBuffer1GBRatio);
+	std::cout << "GPU Copy GPU To GPU (us): " << CopyGPUToGPUTime << " (" << CopyGPUToGPUGBs << "GiB/s)" << "\n";
+
+	float CopyGPUToReadbackTime = (static_cast<float>((GPUCopyGPUToReadback.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
+	float CopyGPUToReadbackGBs = 1000000.0f / (CopyGPUToReadbackTime * GPUBuffer1GBRatio);
+	std::cout << "GPU Copy GPU To Readback (us): " << CopyGPUToReadbackTime << " (" << CopyGPUToReadbackGBs << "GiB/s)" << "\n";
+}
+
+void d3d12()
+{
+
+#ifdef _DEBUG
+	// Enable the D3D12 debug layer.
+	{
+		ComPtr<ID3D12Debug> debugController;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+		{
+			debugController->EnableDebugLayer();
+		}
+	}
+#endif
+
+	ComPtr<ID3D12Device> Device;
+	CheckHR(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&Device)));
+
+	D3D12_FEATURE_DATA_ARCHITECTURE1 DataArchitecture1 = {};
+	CheckHR(Device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &DataArchitecture1, sizeof(DataArchitecture1)));
+
+	std::cout << "UMA: " << DataArchitecture1.UMA << "\n";
+	std::cout << "CacheCoherentUMA: " << DataArchitecture1.CacheCoherentUMA << "\n";
+	std::cout << "IsolatedMMU: " << DataArchitecture1.IsolatedMMU << "\n";
+
+	UINT64 MemorySizes[] = { 1025 * 64, 1025 * 256, 1025*512, 1024 * 1024 * 1, 1024 * 1024 * 2, 1024 * 1024 * 4, 1024 * 1024 * 8, 1024 * 1024 * 16, 1024 * 1024 * 24, 1024 * 1024 * 32, 1024 * 1024 * 64, 1024 * 1024 * 128, 1024 * 1024 * 256, 1024 * 1024 * 512, 1024 * 1024 * 1024 };
+
+	for (UINT64 MemorySize : MemorySizes)
+	{
+		d3d12_run_memory_test(Device, MemorySize);
+	}
 }
 
 void vulkan()

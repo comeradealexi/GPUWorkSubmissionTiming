@@ -12,3 +12,15 @@ GPU Started To GPU Ended (us): 583.43
 GPU Copy Upload To GPU (us): 298.85
 GPU Copy GPU To GPU (us): 16.39
 GPU Copy GPU To Readback (us): 266.62
+
+256MB Buffer Size:
+Timing Results:
+CPU Submission Time (us): 24.7
+CPU Fence Wait  (us): 41191.8
+CPU Before Submission To After Signal Wait (us): 41216.6
+CPU Submission to GPU Started (us): 77.78
+CPU Submission to GPU Ended (us): 41136.4
+GPU Started To GPU Ended (us): 41058.6
+GPU Copy Upload To GPU (us): 19018.2 (13.1453GB/s)
+GPU Copy GPU To GPU (us): 2678.46 (93.3372GB/s)
+GPU Copy GPU To Readback (us): 19360.3 (12.913GB/s)
