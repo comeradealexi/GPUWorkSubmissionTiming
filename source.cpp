@@ -124,14 +124,10 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize)
 	Average GPUCopyGPUToGPU;
 	Average GPUCopyGPUToReadback;
 
-
-	const UINT64 RunCount = 64;
 	UINT64 FenceValueExpected = 0;
-	while (true)
+	const std::chrono::steady_clock::time_point StartTime = std::chrono::steady_clock::now();
+	while ((std::chrono::steady_clock::now() - StartTime) < RUN_TIME_PER_TEST)
 	{
-		if (FenceValueExpected == RunCount)
-			break;
-
 		FenceValueExpected++;
 		Fence->SetEventOnCompletion(FenceValueExpected, CPUEvent);
 
@@ -197,7 +193,7 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize)
 		}
 		QueryReadbackMemory->Unmap(0, nullptr);
 	}
-	std::cout << std::format("\nTiming Results: ({} - {} KiB)\n", GPUBufferSize, GPUBufferSize / 1024);
+	std::cout << std::format("\nTiming Results: Run Count: {} Memory Size: {} B - {} KiB\n", FenceValueExpected, GPUBufferSize, GPUBufferSize / 1024);
 	std::cout << "CPU Submission Time (us): " << (static_cast<float>((CPUTimeSubmission.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
 	std::cout << "CPU Fence Wait  (us): " << (static_cast<float>((CPUTimeFenceWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
 	std::cout << "CPU Before Submission To After Signal Wait (us): " << (static_cast<float>((CPUTimePreSubToAfterWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
@@ -208,15 +204,16 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize)
 
 	float CopyUploadToGPUTime = (static_cast<float>((GPUCopyUploadToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
 	float CopyUploadToGPUGBs = 1000000.0f / (CopyUploadToGPUTime * GPUBuffer1GBRatio);
-	std::cout << "GPU Copy Upload To GPU (us): " << CopyUploadToGPUTime << " (" << CopyUploadToGPUGBs << "GiB/s)" << "\n";
+	std::cout << std::format("GPU Copy Upload To GPU (us): {:.1f} ({:.1f} GiB/s)\n", CopyUploadToGPUTime, CopyUploadToGPUGBs);
 
 	float CopyGPUToGPUTime = (static_cast<float>((GPUCopyGPUToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
 	float CopyGPUToGPUGBs = 1000000.0f / (CopyGPUToGPUTime * GPUBuffer1GBRatio);
-	std::cout << "GPU Copy GPU To GPU (us): " << CopyGPUToGPUTime << " (" << CopyGPUToGPUGBs << "GiB/s)" << "\n";
+	std::cout << std::format("GPU Copy GPU To GPU (us): {:.1f} ({:.1f} GiB/s)\n", CopyGPUToGPUTime, CopyGPUToGPUGBs);
 
 	float CopyGPUToReadbackTime = (static_cast<float>((GPUCopyGPUToReadback.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
 	float CopyGPUToReadbackGBs = 1000000.0f / (CopyGPUToReadbackTime * GPUBuffer1GBRatio);
-	std::cout << "GPU Copy GPU To Readback (us): " << CopyGPUToReadbackTime << " (" << CopyGPUToReadbackGBs << "GiB/s)" << "\n";
+	std::cout << std::format("GPU Copy GPU To Readback (us): {:.1f} ({:.1f} GiB/s)\n", CopyGPUToReadbackTime, CopyGPUToReadbackGBs);
+
 }
 
 void d3d12()

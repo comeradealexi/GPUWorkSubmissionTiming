@@ -1,0 +1,14 @@
+UMA: 1
+CacheCoherentUMA: 1
+IsolatedMMU: 1
+GPU Buffer Size: 4194304
+Timing Results:
+CPU Submission Time (us): 224.8
+CPU Fence Wait  (us): 2879.6
+CPU Before Submission To After Signal Wait (us): 3104.4
+CPU Submission to GPU Started (us): 568.333
+CPU Submission to GPU Ended (us): 2865.26
+GPU Started To GPU Ended (us): 2296.93
+GPU Copy Upload To GPU (us): 768.229
+GPU Copy GPU To GPU (us): 763.646
+GPU Copy GPU To Readback (us): 764.688
