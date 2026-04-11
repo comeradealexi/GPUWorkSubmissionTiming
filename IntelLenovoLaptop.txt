@@ -1,14 +1,168 @@
 UMA: 1
 CacheCoherentUMA: 1
 IsolatedMMU: 1
-GPU Buffer Size: 4194304
-Timing Results:
-CPU Submission Time (us): 224.8
-CPU Fence Wait  (us): 2879.6
-CPU Before Submission To After Signal Wait (us): 3104.4
-CPU Submission to GPU Started (us): 568.333
-CPU Submission to GPU Ended (us): 2865.26
-GPU Started To GPU Ended (us): 2296.93
-GPU Copy Upload To GPU (us): 768.229
-GPU Copy GPU To GPU (us): 763.646
-GPU Copy GPU To Readback (us): 764.688
+
+Timing Results: Run Count: 13375 Memory Size: 65600 B - 64 KiB
+CPU Submission Time (us): 70.3
+CPU Fence Wait  (us): 346.6
+CPU Before Submission To After Signal Wait (us): 416.9
+CPU Submission to GPU Started (us): 258.073
+CPU Submission to GPU Ended (us): 345.729
+GPU Started To GPU Ended (us): 87.6042
+GPU Copy Upload To GPU (us): 32.8 (1.9 GiB/s)
+GPU Copy GPU To GPU (us): 27.2 (2.2 GiB/s)
+GPU Copy GPU To Readback (us): 27.2 (2.2 GiB/s)
+
+Timing Results: Run Count: 11685 Memory Size: 262400 B - 256 KiB
+CPU Submission Time (us): 62.8
+CPU Fence Wait  (us): 500.4
+CPU Before Submission To After Signal Wait (us): 563.3
+CPU Submission to GPU Started (us): 238.802
+CPU Submission to GPU Ended (us): 436.146
+GPU Started To GPU Ended (us): 197.344
+GPU Copy Upload To GPU (us): 69.7 (3.5 GiB/s)
+GPU Copy GPU To GPU (us): 63.4 (3.9 GiB/s)
+GPU Copy GPU To Readback (us): 63.9 (3.8 GiB/s)
+
+Timing Results: Run Count: 9186 Memory Size: 524800 B - 512 KiB
+CPU Submission Time (us): 69.2
+CPU Fence Wait  (us): 681.8
+CPU Before Submission To After Signal Wait (us): 751
+CPU Submission to GPU Started (us): 266.302
+CPU Submission to GPU Ended (us): 610.052
+GPU Started To GPU Ended (us): 343.698
+GPU Copy Upload To GPU (us): 118.9 (4.1 GiB/s)
+GPU Copy GPU To GPU (us): 112.4 (4.3 GiB/s)
+GPU Copy GPU To Readback (us): 112.0 (4.4 GiB/s)
+
+Timing Results: Run Count: 6437 Memory Size: 1048576 B - 1024 KiB
+CPU Submission Time (us): 99
+CPU Fence Wait  (us): 995.2
+CPU Before Submission To After Signal Wait (us): 1094.2
+CPU Submission to GPU Started (us): 310.469
+CPU Submission to GPU Ended (us): 942.344
+GPU Started To GPU Ended (us): 631.875
+GPU Copy Upload To GPU (us): 215.1 (4.5 GiB/s)
+GPU Copy GPU To GPU (us): 208.1 (4.7 GiB/s)
+GPU Copy GPU To Readback (us): 208.2 (4.7 GiB/s)
+
+Timing Results: Run Count: 4107 Memory Size: 2097152 B - 2048 KiB
+CPU Submission Time (us): 139.5
+CPU Fence Wait  (us): 1658.6
+CPU Before Submission To After Signal Wait (us): 1798.2
+CPU Submission to GPU Started (us): 386.719
+CPU Submission to GPU Ended (us): 1593.49
+GPU Started To GPU Ended (us): 1206.77
+GPU Copy Upload To GPU (us): 407.9 (4.8 GiB/s)
+GPU Copy GPU To GPU (us): 399.4 (4.9 GiB/s)
+GPU Copy GPU To Readback (us): 399.1 (4.9 GiB/s)
+
+Timing Results: Run Count: 2271 Memory Size: 4194304 B - 4096 KiB
+CPU Submission Time (us): 227.8
+CPU Fence Wait  (us): 3060.3
+CPU Before Submission To After Signal Wait (us): 3288.2
+CPU Submission to GPU Started (us): 623.385
+CPU Submission to GPU Ended (us): 2986.88
+GPU Started To GPU Ended (us): 2363.44
+GPU Copy Upload To GPU (us): 789.9 (4.9 GiB/s)
+GPU Copy GPU To GPU (us): 784.4 (5.0 GiB/s)
+GPU Copy GPU To Readback (us): 788.8 (5.0 GiB/s)
+
+Timing Results: Run Count: 1670 Memory Size: 8388608 B - 8192 KiB
+CPU Submission Time (us): 288.3
+CPU Fence Wait  (us): 4468.9
+CPU Before Submission To After Signal Wait (us): 4757.2
+CPU Submission to GPU Started (us): 670.99
+CPU Submission to GPU Ended (us): 4433.33
+GPU Started To GPU Ended (us): 3762.29
+GPU Copy Upload To GPU (us): 1258.5 (6.2 GiB/s)
+GPU Copy GPU To GPU (us): 1250.7 (6.2 GiB/s)
+GPU Copy GPU To Readback (us): 1252.8 (6.2 GiB/s)
+
+Timing Results: Run Count: 1405 Memory Size: 16777216 B - 16384 KiB
+CPU Submission Time (us): 250
+CPU Fence Wait  (us): 5856.1
+CPU Before Submission To After Signal Wait (us): 6106.2
+CPU Submission to GPU Started (us): 505.156
+CPU Submission to GPU Ended (us): 5789.27
+GPU Started To GPU Ended (us): 5284.06
+GPU Copy Upload To GPU (us): 1771.3 (8.8 GiB/s)
+GPU Copy GPU To GPU (us): 1743.0 (9.0 GiB/s)
+GPU Copy GPU To Readback (us): 1769.5 (8.8 GiB/s)
+
+Timing Results: Run Count: 1058 Memory Size: 25165824 B - 24576 KiB
+CPU Submission Time (us): 263.5
+CPU Fence Wait  (us): 8214.2
+CPU Before Submission To After Signal Wait (us): 8477.7
+CPU Submission to GPU Started (us): 439.792
+CPU Submission to GPU Ended (us): 8194.9
+GPU Started To GPU Ended (us): 7755.05
+GPU Copy Upload To GPU (us): 2554.6 (9.2 GiB/s)
+GPU Copy GPU To GPU (us): 2565.5 (9.1 GiB/s)
+GPU Copy GPU To Readback (us): 2634.8 (8.9 GiB/s)
+
+Timing Results: Run Count: 828 Memory Size: 33554432 B - 32768 KiB
+CPU Submission Time (us): 298.7
+CPU Fence Wait  (us): 10631.8
+CPU Before Submission To After Signal Wait (us): 10930.5
+CPU Submission to GPU Started (us): 453.281
+CPU Submission to GPU Ended (us): 10672
+GPU Started To GPU Ended (us): 10218.6
+GPU Copy Upload To GPU (us): 3389.7 (9.2 GiB/s)
+GPU Copy GPU To GPU (us): 3403.5 (9.2 GiB/s)
+GPU Copy GPU To Readback (us): 3425.4 (9.1 GiB/s)
+
+Timing Results: Run Count: 436 Memory Size: 67108864 B - 65536 KiB
+CPU Submission Time (us): 425.1
+CPU Fence Wait  (us): 20978.2
+CPU Before Submission To After Signal Wait (us): 21403.4
+CPU Submission to GPU Started (us): 523.281
+CPU Submission to GPU Ended (us): 21159.9
+GPU Started To GPU Ended (us): 20636.6
+GPU Copy Upload To GPU (us): 6770.6 (9.2 GiB/s)
+GPU Copy GPU To GPU (us): 6869.1 (9.1 GiB/s)
+GPU Copy GPU To Readback (us): 6996.8 (8.9 GiB/s)
+
+Timing Results: Run Count: 233 Memory Size: 134217728 B - 131072 KiB
+CPU Submission Time (us): 366.1
+CPU Fence Wait  (us): 41344.4
+CPU Before Submission To After Signal Wait (us): 41710.6
+CPU Submission to GPU Started (us): 441.302
+CPU Submission to GPU Ended (us): 41448.5
+GPU Started To GPU Ended (us): 41007.1
+GPU Copy Upload To GPU (us): 13652.5 (9.2 GiB/s)
+GPU Copy GPU To GPU (us): 13595.7 (9.2 GiB/s)
+GPU Copy GPU To Readback (us): 13758.9 (9.1 GiB/s)
+
+Timing Results: Run Count: 118 Memory Size: 268435456 B - 262144 KiB
+CPU Submission Time (us): 497.5
+CPU Fence Wait  (us): 82608.9
+CPU Before Submission To After Signal Wait (us): 83106.4
+CPU Submission to GPU Started (us): 579.688
+CPU Submission to GPU Ended (us): 82818.6
+GPU Started To GPU Ended (us): 82238.9
+GPU Copy Upload To GPU (us): 27392.1 (9.1 GiB/s)
+GPU Copy GPU To GPU (us): 27468.9 (9.1 GiB/s)
+GPU Copy GPU To Readback (us): 27377.8 (9.1 GiB/s)
+
+Timing Results: Run Count: 60 Memory Size: 536870912 B - 524288 KiB
+CPU Submission Time (us): 439.5
+CPU Fence Wait  (us): 165366
+CPU Before Submission To After Signal Wait (us): 165806
+CPU Submission to GPU Started (us): 587.031
+CPU Submission to GPU Ended (us): 165513
+GPU Started To GPU Ended (us): 164926
+GPU Copy Upload To GPU (us): 54908.5 (9.1 GiB/s)
+GPU Copy GPU To GPU (us): 55095.9 (9.1 GiB/s)
+GPU Copy GPU To Readback (us): 54921.4 (9.1 GiB/s)
+
+Timing Results: Run Count: 30 Memory Size: 1073741824 B - 1048576 KiB
+CPU Submission Time (us): 287.7
+CPU Fence Wait  (us): 338696
+CPU Before Submission To After Signal Wait (us): 338983
+CPU Submission to GPU Started (us): 429.115
+CPU Submission to GPU Ended (us): 338707
+GPU Started To GPU Ended (us): 338278
+GPU Copy Upload To GPU (us): 111772.1 (8.9 GiB/s)
+GPU Copy GPU To GPU (us): 112380.8 (8.9 GiB/s)
+GPU Copy GPU To Readback (us): 114124.7 (8.8 GiB/s)
