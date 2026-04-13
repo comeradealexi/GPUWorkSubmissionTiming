@@ -27,6 +27,25 @@ struct Average
 };
 enum GPUTimestamps : UINT64 { AllGPUWork, UploadToGPU, GPUToGPU, GPUToReadBack, EnumMax };
 
+struct CSVDataEntry
+{
+	static constexpr const char*  Header = "Memory Size, Upload To GPU Time (us), Upload To GPU Speed (GiB/s), GPU To GPU Time (us), GPU To GPU Speed (GiB/s), GPU To Readback Time (us), GPU To Readback Speed (GiB/s)\n";
+	UINT64 MemorySize;
+	float UploadToGPU_Time;
+	float UploadToGPU_GBPS;
+	float GPUToGPU_Time;
+	float GPUToGPU_GBPS;
+	float GPUToReadback_Time;
+	float GPUToReadback_GBPS;
+};
+
+template <typename T>
+static T& operator <<(T& LHS, const CSVDataEntry& RHS)
+{
+	LHS << RHS.MemorySize << "," << RHS.UploadToGPU_Time << "," << RHS.UploadToGPU_GBPS << "," << RHS.GPUToGPU_Time << "," << RHS.GPUToGPU_GBPS << "," << RHS.GPUToReadback_Time << "," << RHS.GPUToReadback_GBPS << "\n";
+	return LHS;
+}
+
 #define CheckHR(x) { HRESULT _hr = x; if (FAILED(_hr)) { std::cout<< "HR FAILURE\n"; return; } }
 void CopyResource(GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, ComPtr<ID3D12GraphicsCommandList> CommandList, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
 {
@@ -61,8 +80,9 @@ int main()
 	d3d12();
 }
 
-void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize)
+void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize, CSVDataEntry& CSVData)
 {
+	CSVData.MemorySize = GPUBufferSize;
 	ComPtr<ID3D12Resource> GPUMemoryA;
 	ComPtr<ID3D12Resource> GPUMemoryB;
 	ComPtr<ID3D12Resource> UploadMemory;
@@ -92,6 +112,7 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize)
 
 	D3D12_COMMAND_QUEUE_DESC CommandQueueDesc = {};
 	CommandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+	CommandQueueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
 	CommandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 	CheckHR(Device->CreateCommandQueue(&CommandQueueDesc, IID_PPV_ARGS(&CommandQueue)));
 	CheckHR(Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&CommandAllocator)));
@@ -193,26 +214,26 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize)
 		}
 		QueryReadbackMemory->Unmap(0, nullptr);
 	}
-	std::cout << std::format("\nTiming Results: Run Count: {} Memory Size: {} B - {} KiB\n", FenceValueExpected, GPUBufferSize, GPUBufferSize / 1024);
-	std::cout << "CPU Submission Time (us): " << (static_cast<float>((CPUTimeSubmission.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
-	std::cout << "CPU Fence Wait  (us): " << (static_cast<float>((CPUTimeFenceWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
+	std::cout << std::format("\nTiming Results: Run Count: {:<6} Memory Size: {} B / {} KiB / {} MiB\n", FenceValueExpected, GPUBufferSize, GPUBufferSize / 1024, (GPUBufferSize / 1024) / 1024);
+	std::cout << "CPU Submission Time (us):                        " << (static_cast<float>((CPUTimeSubmission.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
+	std::cout << "CPU Fence Wait  (us):                            " << (static_cast<float>((CPUTimeFenceWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
 	std::cout << "CPU Before Submission To After Signal Wait (us): " << (static_cast<float>((CPUTimePreSubToAfterWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
 
 	std::cout << "CPU Submission to GPU Started (us): " << (static_cast<float>((CPUSubmissionToGPUStarted.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
-	std::cout << "CPU Submission to GPU Ended (us): " << (static_cast<float>((CPUSubmissionToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
-	std::cout << "GPU Started To GPU Ended (us): " << (static_cast<float>((GPUStartedToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
+	std::cout << "CPU Submission to GPU Ended (us):   " << (static_cast<float>((CPUSubmissionToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
+	std::cout << "GPU Started To GPU Ended (us):      " << (static_cast<float>((GPUStartedToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
 
-	float CopyUploadToGPUTime = (static_cast<float>((GPUCopyUploadToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
-	float CopyUploadToGPUGBs = 1000000.0f / (CopyUploadToGPUTime * GPUBuffer1GBRatio);
-	std::cout << std::format("GPU Copy Upload To GPU (us): {:.1f} ({:.1f} GiB/s)\n", CopyUploadToGPUTime, CopyUploadToGPUGBs);
+	float CopyUploadToGPUTime = CSVData.UploadToGPU_Time = (static_cast<float>((GPUCopyUploadToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
+	float CopyUploadToGPUGBs = CSVData.UploadToGPU_GBPS = 1000000.0f / (CopyUploadToGPUTime * GPUBuffer1GBRatio);
+	std::cout << std::format("GPU Copy Upload To GPU (us):   {:6.1f} ({:5.1f} GiB/s)\n", CopyUploadToGPUTime, CopyUploadToGPUGBs);
 
-	float CopyGPUToGPUTime = (static_cast<float>((GPUCopyGPUToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
-	float CopyGPUToGPUGBs = 1000000.0f / (CopyGPUToGPUTime * GPUBuffer1GBRatio);
-	std::cout << std::format("GPU Copy GPU To GPU (us): {:.1f} ({:.1f} GiB/s)\n", CopyGPUToGPUTime, CopyGPUToGPUGBs);
+	float CopyGPUToGPUTime = CSVData.GPUToGPU_Time = (static_cast<float>((GPUCopyGPUToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
+	float CopyGPUToGPUGBs = CSVData.GPUToGPU_GBPS = 1000000.0f / (CopyGPUToGPUTime * GPUBuffer1GBRatio);
+	std::cout << std::format("GPU Copy GPU To GPU (us):      {:6.1f} ({:5.1f} GiB/s)\n", CopyGPUToGPUTime, CopyGPUToGPUGBs);
 
-	float CopyGPUToReadbackTime = (static_cast<float>((GPUCopyGPUToReadback.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
-	float CopyGPUToReadbackGBs = 1000000.0f / (CopyGPUToReadbackTime * GPUBuffer1GBRatio);
-	std::cout << std::format("GPU Copy GPU To Readback (us): {:.1f} ({:.1f} GiB/s)\n", CopyGPUToReadbackTime, CopyGPUToReadbackGBs);
+	float CopyGPUToReadbackTime = CSVData.GPUToReadback_Time = (static_cast<float>((GPUCopyGPUToReadback.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
+	float CopyGPUToReadbackGBs = CSVData.GPUToReadback_GBPS = 1000000.0f / (CopyGPUToReadbackTime * GPUBuffer1GBRatio);
+	std::cout << std::format("GPU Copy GPU To Readback (us): {:6.1f} ({:5.1f} GiB/s)\n", CopyGPUToReadbackTime, CopyGPUToReadbackGBs);
 
 }
 
@@ -240,11 +261,53 @@ void d3d12()
 	std::cout << "CacheCoherentUMA: " << DataArchitecture1.CacheCoherentUMA << "\n";
 	std::cout << "IsolatedMMU: " << DataArchitecture1.IsolatedMMU << "\n";
 
-	UINT64 MemorySizes[] = { 1025 * 64, 1025 * 256, 1025*512, 1024 * 1024 * 1, 1024 * 1024 * 2, 1024 * 1024 * 4, 1024 * 1024 * 8, 1024 * 1024 * 16, 1024 * 1024 * 24, 1024 * 1024 * 32, 1024 * 1024 * 64, 1024 * 1024 * 128, 1024 * 1024 * 256, 1024 * 1024 * 512, 1024 * 1024 * 1024 };
+	UINT64 MemorySizes[] = {
+ 		1024,
+		1024 * 16,
+		1024 * 32,
+ 		1024 * 64, 
+		1024 * 128,
+ 		1024 * 256,
+		1024 * 384,
+ 		1024 * 512, 
+		1024 * 768,
+ 		1024 * 1024 * 1, 
+ 		1024 * 1024 * 2, 
+		1024 * 1024 * 3,
+ 		1024 * 1024 * 4, 
+		1024 * 1024 * 6,
+ 		1024 * 1024 * 8, 
+		1024 * 1024 * 12,
+ 		1024 * 1024 * 16, 
+		1024 * 1024 * 20,
+		1024 * 1024 * 24, 
+ 		1024 * 1024 * 32, 
+		1024 * 1024 * 48,
+		1024 * 1024 * 64,
+		1024 * 1024 * 96,
+		1024 * 1024 * 128,
+		1024 * 1024 * 256,
+		1024 * 1024 * 512,
+ 		1024 * 1024 * 1024 
+	};
+
+	std::vector<CSVDataEntry> CSVDataList;
 
 	for (UINT64 MemorySize : MemorySizes)
 	{
-		d3d12_run_memory_test(Device, MemorySize);
+		CSVDataEntry CSVData = {};
+		d3d12_run_memory_test(Device, MemorySize, CSVData);
+		CSVDataList.emplace_back(CSVData);
+	}
+
+	std::ofstream OutWriteFile("Results.csv", std::ios::binary);
+	if (OutWriteFile.good())
+	{
+		OutWriteFile << CSVDataEntry::Header;
+		for (const CSVDataEntry& Entry : CSVDataList)
+		{
+			OutWriteFile << Entry;
+		}
 	}
 }
 
