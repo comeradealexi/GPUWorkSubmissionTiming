@@ -46,33 +46,118 @@ static T& operator <<(T& LHS, const CSVDataEntry& RHS)
 	return LHS;
 }
 
-#define CheckHR(x) { HRESULT _hr = x; if (FAILED(_hr)) { std::cout<< "HR FAILURE\n"; return; } }
+#define CheckHR(x) { HRESULT _hr = x; if (FAILED(_hr)) { std::cout<< "HR FAILURE\n"; __debugbreak(); return; } }
+enum class CopyResourceMethod { CopyResource, ComputeShader };
 void CopyResource(GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, ComPtr<ID3D12GraphicsCommandList> CommandList, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
 {
 	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 0));
 
 	{ // Barriers
-		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2] =
+		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
+		UINT BarrierCount = 1;
+		if (Timestamp == UploadToGPU)
 		{
-			CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
-			CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST)
-		};
-		CommandList->ResourceBarrier(2, ResourceBarriers);
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+		}
+		else if (Timestamp == GPUToReadBack)
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		}
+		else
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE); 			
+			ResourceBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+			BarrierCount = 2;
+		}
+		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
 	}
+
 	CommandList->CopyResource(Destination.Get(), Source.Get());
+
 	{ // Barriers
-		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2] =
+		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
+		UINT BarrierCount = 1;
+		if (Timestamp == UploadToGPU)
 		{
-			CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON),
-			CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON)
-		};
-		CommandList->ResourceBarrier(2, ResourceBarriers);
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
+		}
+		else if (Timestamp == GPUToReadBack)
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+		}
+		else
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON );
+			ResourceBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON );
+			BarrierCount = 2;
+		}
+		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
 	}
 
 	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 1));
 }
 
-const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::seconds(10);
+void CopyResourceCompute(UINT64 BufferSize, GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, ComPtr<ID3D12GraphicsCommandList> CommandList, ComPtr<ID3D12RootSignature> ComputeRootSignature, ComPtr<ID3D12PipelineState> ComputePipelineState, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
+{
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 0));
+
+	{ // Barriers
+		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
+		UINT BarrierCount = 1;
+		if (Timestamp == UploadToGPU)
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		}
+		else if (Timestamp == GPUToReadBack)
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		}
+		else
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			ResourceBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			BarrierCount = 2;
+		}
+		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
+	}
+
+	{
+		CommandList->SetComputeRootSignature(ComputeRootSignature.Get());
+		CommandList->SetPipelineState(ComputePipelineState.Get());
+		CommandList->SetComputeRootShaderResourceView(0, Source->GetGPUVirtualAddress());
+		CommandList->SetComputeRootUnorderedAccessView(1, Destination->GetGPUVirtualAddress());
+		CommandList->Dispatch(static_cast<UINT>(BufferSize / 4), 1, 1);
+
+		CD3DX12_RESOURCE_BARRIER UAVBarrier = CD3DX12_RESOURCE_BARRIER::UAV(Destination.Get());
+		CommandList->ResourceBarrier(1, &UAVBarrier);
+
+	}
+
+	{ // Barriers
+		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
+		UINT BarrierCount = 1;
+
+		if (Timestamp == UploadToGPU)
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON);
+		}
+		else if (Timestamp == GPUToReadBack)
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+		}
+		else
+		{
+			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+			ResourceBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON);
+			BarrierCount = 2;
+		}
+		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
+	}
+
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 1));
+}
+
+const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::seconds(1);
 
 int main()
 {
@@ -80,7 +165,7 @@ int main()
 	d3d12();
 }
 
-void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize, CSVDataEntry& CSVData)
+void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSize, CSVDataEntry& CSVData)
 {
 	CSVData.MemorySize = GPUBufferSize;
 	ComPtr<ID3D12Resource> GPUMemoryA;
@@ -88,16 +173,32 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize, CS
 	ComPtr<ID3D12Resource> UploadMemory;
 	ComPtr<ID3D12Resource> ReadbackMemory;
 	ComPtr<ID3D12Resource> QueryReadbackMemory;
+
 	const float GPUBuffer1GBRatio = float(1024 * 1024 * 1024) / float(GPUBufferSize);
 	{
 		CD3DX12_HEAP_PROPERTIES GPUHeapProperties(D3D12_HEAP_TYPE_DEFAULT);
 		CD3DX12_HEAP_PROPERTIES UploadHeapProperties(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_HEAP_PROPERTIES ReadbackHeapProperties(D3D12_HEAP_TYPE_READBACK);
+		CD3DX12_RESOURCE_DESC ResourceDescGPU = CD3DX12_RESOURCE_DESC::Buffer(GPUBufferSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		CD3DX12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(GPUBufferSize);
-		CheckHR(Device->CreateCommittedResource(&GPUHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&GPUMemoryA)));
-		CheckHR(Device->CreateCommittedResource(&GPUHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&GPUMemoryB)));
-		CheckHR(Device->CreateCommittedResource(&UploadHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&UploadMemory)));
-		CheckHR(Device->CreateCommittedResource(&ReadbackHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&ReadbackMemory)));
+		CheckHR(Device->CreateCommittedResource(&GPUHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDescGPU, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&GPUMemoryA)));
+		CheckHR(Device->CreateCommittedResource(&GPUHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDescGPU, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&GPUMemoryB)));
+		CheckHR(Device->CreateCommittedResource(&UploadHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadMemory)));
+		CheckHR(Device->CreateCommittedResource(&ReadbackHeapProperties, D3D12_HEAP_FLAG_NONE, &ResourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&ReadbackMemory)));
+	}
+	
+	// Set UPLOAD memory to unique value
+	const int UniqueValue = rand();
+	std::cout << "UniqueValue: " << UniqueValue << "\n";
+	{
+		D3D12_RANGE Range = { 0, GPUBufferSize };
+		int* MappedPointer;
+		CheckHR(UploadMemory->Map(0, &Range, (void**) &MappedPointer));
+		for (int i = 0; i < GPUBufferSize / sizeof(int); i++)
+		{
+			MappedPointer[i] = UniqueValue;
+		}
+		UploadMemory->Unmap(0, &Range);
 	}
 
 	{
@@ -106,10 +207,35 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize, CS
 		CheckHR(Device->CreateCommittedResource(&ReadbackHeapProperties, D3D12_HEAP_FLAG_NONE, &QueryResourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&QueryReadbackMemory)));
 	}
 
+	
+	ComPtr<ID3D12RootSignature> ComputeRootSignature;
+	{
+		CD3DX12_ROOT_PARAMETER1 RootParameters[2] = {};
+		RootParameters[0].InitAsShaderResourceView(0, 0/*, D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC*/);
+		RootParameters[1].InitAsUnorderedAccessView(0, 0/*, D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC*/);
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC RootSigDesc = {};
+		RootSigDesc.Init_1_1(2, RootParameters);
+		ComPtr<ID3DBlob> RootSignatureBlob;
+		ComPtr<ID3DBlob> Error;
+		CheckHR(D3DX12SerializeVersionedRootSignature(&RootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1_1, &RootSignatureBlob, &Error));
+		CheckHR(Device->CreateRootSignature(0, RootSignatureBlob->GetBufferPointer(), RootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&ComputeRootSignature)));
+	}
+
+	ComPtr<ID3D12PipelineState> ComputePipelineState;
+	{
+		D3D12_COMPUTE_PIPELINE_STATE_DESC ComputePSODesc = {};
+		std::ifstream ComputeShaderFile("ComputeShader.cso", std::ios::binary);
+		if (!ComputeShaderFile.good()) { CheckHR(E_FAIL); }
+		std::vector<char> fileContents((std::istreambuf_iterator<char>(ComputeShaderFile)), std::istreambuf_iterator<char>());
+		ComputePSODesc.pRootSignature = ComputeRootSignature.Get();
+		ComputePSODesc.CS = CD3DX12_SHADER_BYTECODE(fileContents.data(), fileContents.size());
+		CheckHR(Device->CreateComputePipelineState(&ComputePSODesc, IID_PPV_ARGS(&ComputePipelineState)));
+	}
+
 	ComPtr<ID3D12CommandQueue> CommandQueue;
 	ComPtr<ID3D12CommandAllocator> CommandAllocator;
 	ComPtr<ID3D12GraphicsCommandList> CommandList;
-
+	
 	D3D12_COMMAND_QUEUE_DESC CommandQueueDesc = {};
 	CommandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
 	CommandQueueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
@@ -150,20 +276,34 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize, CS
 	while ((std::chrono::steady_clock::now() - StartTime) < RUN_TIME_PER_TEST)
 	{
 		FenceValueExpected++;
-		Fence->SetEventOnCompletion(FenceValueExpected, CPUEvent);
 
 		// Command List Recording
 		{
 			CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (GPUTimestamps::AllGPUWork * 2) + 0);
 			{
-				// UploadToGPU
-				CopyResource(GPUTimestamps::UploadToGPU, QueryHeap, CommandList, GPUMemoryA, UploadMemory);
+				if (true)
+				{
+					// UploadToGPU
+					CopyResourceCompute(GPUBufferSize, GPUTimestamps::UploadToGPU, QueryHeap, CommandList, ComputeRootSignature, ComputePipelineState, GPUMemoryA, UploadMemory);
 
-				// GPUToGPU
-				CopyResource(GPUTimestamps::GPUToGPU, QueryHeap, CommandList, GPUMemoryB, GPUMemoryA);
+					// GPUToGPU
+					CopyResourceCompute(GPUBufferSize, GPUTimestamps::GPUToGPU, QueryHeap, CommandList, ComputeRootSignature, ComputePipelineState, GPUMemoryB, GPUMemoryA);
 
-				// GPUToReadback
-				CopyResource(GPUTimestamps::GPUToReadBack, QueryHeap, CommandList, ReadbackMemory, GPUMemoryB);
+					// GPUToReadback (Can't bind READBACK as UAV so fall back to normal CopyResource)
+					CopyResource(GPUTimestamps::GPUToReadBack, QueryHeap, CommandList, ReadbackMemory, GPUMemoryB);
+				}
+				else
+				{
+					// UploadToGPU
+					CopyResource(GPUTimestamps::UploadToGPU, QueryHeap, CommandList, GPUMemoryA, UploadMemory);
+
+					// GPUToGPU
+					CopyResource(GPUTimestamps::GPUToGPU, QueryHeap, CommandList, GPUMemoryB, GPUMemoryA);
+
+					// GPUToReadback
+					CopyResource(GPUTimestamps::GPUToReadBack, QueryHeap, CommandList, ReadbackMemory, GPUMemoryB);
+				}
+
 			}
 			CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (GPUTimestamps::AllGPUWork * 2) + 1);
 			CommandList->ResolveQueryData(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, GPUTimestamps::EnumMax * 2, QueryReadbackMemory.Get(), 0);
@@ -174,23 +314,43 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, UINT64 GPUBufferSize, CS
 		UINT64 GpuStartTimestamp;
 		UINT64 CpuStartTimestamp;
 		CheckHR(CommandQueue->GetClockCalibration(&GpuStartTimestamp, &CpuStartTimestamp));
-
+		
 		// Submit GPU Work
 		ID3D12CommandList* const CommandListSubmission = CommandList.Get();
 		CommandQueue->ExecuteCommandLists(1, &CommandListSubmission);
-		CommandQueue->Signal(Fence.Get(), FenceValueExpected);
+		CheckHR(CommandQueue->Signal(Fence.Get(), FenceValueExpected));
 
 		LARGE_INTEGER CPUTimeAfterSubmission;
 		QueryPerformanceCounter(&CPUTimeAfterSubmission);
 
 		// Wait for GPU to complete
-		WaitForSingleObject(CPUEvent, INFINITE);
+		CheckHR(Fence->SetEventOnCompletion(FenceValueExpected, CPUEvent));
+		WaitForSingleObjectEx(CPUEvent, INFINITE, FALSE);
 
 		LARGE_INTEGER CPUTimeAfterSignalled;
 		QueryPerformanceCounter(&CPUTimeAfterSignalled);
 
 		// Reset command list for next recording
-		CommandList->Reset(CommandAllocator.Get(), nullptr);
+		CheckHR(CommandAllocator->Reset());
+		CheckHR(CommandList->Reset(CommandAllocator.Get(), nullptr));
+
+		// Ensure our data passed through the entire process correctly
+		{
+			D3D12_RANGE Range = { 0, GPUBufferSize };
+			int* MappedPointer;
+			CheckHR(ReadbackMemory->Map(0, &Range, (void**) &MappedPointer));
+			std::cout << "Mapped Pointer Address: " << MappedPointer << "\n";
+			for (int i = 0; i < GPUBufferSize / sizeof(int); i++)
+			{
+				if (MappedPointer[i] != UniqueValue)
+				{
+					std::cout << "READBACK Memory does not match UPLOAD memory.\n";
+					CheckHR(E_FAIL);
+				}
+			}
+			Range.End = 0;
+			ReadbackMemory->Unmap(0, &Range);
+		}
 
 		// Collect timing data
 		D3D12_RANGE Range = { 0, sizeof(UINT64) * GPUTimestamps::EnumMax };
@@ -243,11 +403,17 @@ void d3d12()
 #ifdef _DEBUG
 	// Enable the D3D12 debug layer.
 	{
-		ComPtr<ID3D12Debug> debugController;
-		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+		ComPtr<ID3D12Debug> DebugController;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&DebugController))))
 		{
-			debugController->EnableDebugLayer();
+			DebugController->EnableDebugLayer();
+			ComPtr<ID3D12Debug1> DebugController1;
+			if (SUCCEEDED(DebugController->QueryInterface(IID_PPV_ARGS(&DebugController1))))
+			{
+				DebugController1->SetEnableGPUBasedValidation(TRUE);
+			}
 		}
+
 	}
 #endif
 
@@ -295,6 +461,7 @@ void d3d12()
 
 	for (UINT64 MemorySize : MemorySizes)
 	{
+		std::cout << "Starting Test: " << MemorySize << "\n";
 		CSVDataEntry CSVData = {};
 		d3d12_run_memory_test(Device, MemorySize, CSVData);
 		CSVDataList.emplace_back(CSVData);
