@@ -126,7 +126,7 @@ void CopyResourceCompute(UINT64 BufferSize, GPUTimestamps Timestamp, ComPtr<ID3D
 		CommandList->SetPipelineState(ComputePipelineState.Get());
 		CommandList->SetComputeRootShaderResourceView(0, Source->GetGPUVirtualAddress());
 		CommandList->SetComputeRootUnorderedAccessView(1, Destination->GetGPUVirtualAddress());
-		CommandList->Dispatch(static_cast<UINT>(BufferSize / 4), 1, 1);
+		CommandList->Dispatch(static_cast<UINT>(BufferSize / 1024), 1, 1);
 
 		CD3DX12_RESOURCE_BARRIER UAVBarrier = CD3DX12_RESOURCE_BARRIER::UAV(Destination.Get());
 		CommandList->ResourceBarrier(1, &UAVBarrier);
@@ -157,7 +157,7 @@ void CopyResourceCompute(UINT64 BufferSize, GPUTimestamps Timestamp, ComPtr<ID3D
 	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 1));
 }
 
-const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::seconds(1);
+const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::milliseconds(1000);
 
 int main()
 {
@@ -192,11 +192,11 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 	std::cout << "UniqueValue: " << UniqueValue << "\n";
 	{
 		D3D12_RANGE Range = { 0, GPUBufferSize };
-		int* MappedPointer;
-		CheckHR(UploadMemory->Map(0, &Range, (void**) &MappedPointer));
+		int* MappedUploadPointer;
+		CheckHR(UploadMemory->Map(0, &Range, (void**) &MappedUploadPointer));
 		for (int i = 0; i < GPUBufferSize / sizeof(int); i++)
 		{
-			MappedPointer[i] = UniqueValue;
+			MappedUploadPointer[i] = UniqueValue;
 		}
 		UploadMemory->Unmap(0, &Range);
 	}
@@ -337,15 +337,22 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 		// Ensure our data passed through the entire process correctly
 		{
 			D3D12_RANGE Range = { 0, GPUBufferSize };
-			int* MappedPointer;
-			CheckHR(ReadbackMemory->Map(0, &Range, (void**) &MappedPointer));
-			std::cout << "Mapped Pointer Address: " << MappedPointer << "\n";
+			static int* PrevMappedAddress = 0;
+			int* MappedReadbackPointer;
+			CheckHR(ReadbackMemory->Map(0, &Range, (void**) &MappedReadbackPointer));
+			if (MappedReadbackPointer != PrevMappedAddress)
+			{
+				PrevMappedAddress = MappedReadbackPointer;
+				std::cout << "Mapped Pointer Address: " << MappedReadbackPointer << "->" << reinterpret_cast<int*>(reinterpret_cast<char*>(MappedReadbackPointer) + GPUBufferSize) << "\n";
+			}
 			for (int i = 0; i < GPUBufferSize / sizeof(int); i++)
 			{
-				if (MappedPointer[i] != UniqueValue)
+				const int MappedPointerValue = MappedReadbackPointer[i];
+				if (MappedPointerValue != UniqueValue)
 				{
 					std::cout << "READBACK Memory does not match UPLOAD memory.\n";
-					CheckHR(E_FAIL);
+					std::cout << "Expecting: " << UniqueValue << " Encountered: " << MappedPointerValue << "\n";
+					__debugbreak();
 				}
 			}
 			Range.End = 0;
@@ -428,7 +435,7 @@ void d3d12()
 	std::cout << "IsolatedMMU: " << DataArchitecture1.IsolatedMMU << "\n";
 
 	UINT64 MemorySizes[] = {
- 		1024,
+		1024,
 		1024 * 16,
 		1024 * 32,
  		1024 * 64, 
