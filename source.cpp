@@ -435,8 +435,8 @@ void d3d12()
 	std::cout << "IsolatedMMU: " << DataArchitecture1.IsolatedMMU << "\n";
 
 	UINT64 MemorySizes[] = {
-		1024,
-		1024 * 16,
+ 		1024,
+ 		1024 * 16,
 		1024 * 32,
  		1024 * 64, 
 		1024 * 128,

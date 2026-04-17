@@ -4,5 +4,6 @@ RWByteAddressBuffer Destination : register(u0);
 [numthreads(256, 1, 1)]
 void main( uint3 DTid : SV_DispatchThreadID )
 {
-    Destination.Store4(DTid.x * 4, Source.Load4(DTid.x * 4));
+    uint4 Value = Source.Load4(DTid.x * 4);
+    Destination.Store4(DTid.x * 4, Value);
 }
