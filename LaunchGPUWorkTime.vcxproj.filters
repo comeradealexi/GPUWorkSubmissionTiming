@@ -20,6 +20,21 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="ComputeShader.hlsl" />
+    <FxCompile Include="ByteCopyBase.hlsl" />
+    <FxCompile Include="BAB-64Threads16BytesPerThread1024Total.hlsl" />
+    <FxCompile Include="BAB-64Threads32BytesPerThread2048Total.hlsl" />
+    <FxCompile Include="BAB-64Threads64BytesPerThread4096Total.hlsl" />
+    <FxCompile Include="BAB-32Threads128BytesPerThread4096Total.hlsl" />
+    <FxCompile Include="BAB-32Threads32BytesPerThread1024Total.hlsl" />
+    <FxCompile Include="BAB-32Threads64BytesPerThread2048Total.hlsl" />
+    <FxCompile Include="BAB-16Threads32BytesPerThread512Total.hlsl" />
+    <FxCompile Include="BAB-32Threads16BytesPerThread512Total.hlsl" />
+    <FxCompile Include="BAB-128Threads16BytesPerThread2048Total.hlsl" />
+    <FxCompile Include="BAB-256Threads16BytesPerThread4096Total.hlsl" />
+    <FxCompile Include="BAB-512Threads16BytesPerThread8192Total.hlsl" />
+    <FxCompile Include="BAB-16Threads16BytesPerThread256Total.hlsl" />
+    <FxCompile Include="BAB-16Threads128BytesPerThread2048Total.hlsl" />
+    <FxCompile Include="BAB-1024Threads16BytesPerThread16384Total.hlsl" />
+    <FxCompile Include="BAB-16Threads64BytesPerThread1024Total.hlsl" />
   </ItemGroup>
 </Project>
