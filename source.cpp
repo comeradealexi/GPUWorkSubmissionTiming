@@ -10,7 +10,7 @@
 using namespace Microsoft::WRL;
 
 #define CheckHR(x) { HRESULT _hr = x; if (FAILED(_hr)) { std::cout<< "HR FAILURE\n"; __debugbreak(); } }
-const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::milliseconds(1000);
+const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::milliseconds(5000);
 
 struct Average
 {
@@ -553,7 +553,8 @@ int main()
 	ComPtr<ID3D12Device> Device;
 	CheckHR(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&Device)));
 
-	CheckHR(Device->SetStablePowerState(TRUE));
+	// I've observed some inconsistent behaviour with SetStablePowerState ENABLED
+	// CheckHR(Device->SetStablePowerState(TRUE));
 
 	D3D12_FEATURE_DATA_ARCHITECTURE1 DataArchitecture1 = {};
 	CheckHR(Device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &DataArchitecture1, sizeof(DataArchitecture1)));
