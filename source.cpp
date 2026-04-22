@@ -6,33 +6,34 @@
 #include <chrono>
 #include <unordered_map>
 #include <array>
-//#include <vulkan/vulkan.hpp>
 #include <wrl/client.h>
 using namespace Microsoft::WRL;
-void d3d12();
 
-#define CheckHR(x) { HRESULT _hr = x; if (FAILED(_hr)) { std::cout<< "HR FAILURE\n"; __debugbreak(); return; } }
+#define CheckHR(x) { HRESULT _hr = x; if (FAILED(_hr)) { std::cout<< "HR FAILURE\n"; __debugbreak(); } }
+const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::milliseconds(1000);
 
 struct Average
 {
-	UINT64 operator += (UINT64 rhs)
+	UINT64 operator += (UINT64 RHS)
 	{
-		value += rhs;
-		count++;
-		return value;
+		Value += RHS;
+		Count++;
+		return Value;
 	}
-	UINT64 calculate_average()
+	const UINT64 CalculateAverage()
 	{
-		if (count == 0) return 0;
-		return value / count;
+		if (Count == 0) return 0;
+		return Value / Count;
 	}
-	UINT64 value = 0;
-	UINT64 count = 0;
+	UINT64 Value = 0;
+	UINT64 Count = 0;
 };
-enum GPUTimestamps : UINT64 { AllGPUWork, UploadToGPU, GPUToGPU, GPUToReadBack, EnumMax };
+enum GPUWorkload : UINT64 { UploadToGPU, GPUToGPU, GPUToReadBack, EnumMax };
 
 enum class DataCollected
 {
+	CPUToGPUResponse_Time,
+	GPUToCPUResponseTime,
 	UploadToGPU_Time,
 	UploadToGPU_Speed,
 	GPUToGPU_Time,
@@ -41,8 +42,10 @@ enum class DataCollected
 	GPUToReadback_Speed,
 	EnumMax,
 };
-static const char* const DataCollectedNames[(size_t)DataCollected::EnumMax]
+static const char* const DataCollectedNames[]
 {
+	"CPU GPU Response Time",
+	"GPU CPU Response Time",
 	"Upload GPU Time",
 	"Upload GPU Speed",
 	"GPU GPU Time",
@@ -90,15 +93,15 @@ struct ComputeShader
 
 ComputeShader ComputeShaderList[] =
 {
- 	{ 256,	"BAB-16Threads16BytesPerThread256Total.cso" },
- 	{ 512,	"BAB-16Threads32BytesPerThread512Total.cso" },
- 	{ 1024,	"BAB-16Threads64BytesPerThread1024Total.cso" },
- 	{ 2048,	"BAB-16Threads128BytesPerThread2048Total.cso" },
- 
- 	{ 512,	"BAB-32Threads16BytesPerThread512Total.cso" },
- 	{ 1024,	"BAB-32Threads32BytesPerThread1024Total.cso" },
- 	{ 2048,	"BAB-32Threads64BytesPerThread2048Total.cso" },
- 	{ 4096, "BAB-32Threads128BytesPerThread4096Total.cso" },
+	{ 256,	"BAB-16Threads16BytesPerThread256Total.cso" },
+	{ 512,	"BAB-16Threads32BytesPerThread512Total.cso" },
+	{ 1024,	"BAB-16Threads64BytesPerThread1024Total.cso" },
+	{ 2048,	"BAB-16Threads128BytesPerThread2048Total.cso" },
+
+	{ 512,	"BAB-32Threads16BytesPerThread512Total.cso" },
+	{ 1024,	"BAB-32Threads32BytesPerThread1024Total.cso" },
+	{ 2048,	"BAB-32Threads64BytesPerThread2048Total.cso" },
+  	{ 4096, "BAB-32Threads128BytesPerThread4096Total.cso" },
  
  	{ 1024, "BAB-64Threads16BytesPerThread1024Total.cso" },
 	{ 2048, "BAB-64Threads32BytesPerThread2048Total.cso" },
@@ -110,7 +113,61 @@ ComputeShader ComputeShaderList[] =
 
 	{ 8192, "BAB-512Threads16BytesPerThread8192Total.cso" },
 
-	{ 16384, "BAB-1024Threads16BytesPerThread16384Total.cso" }
+ 	{ 16384, "BAB-1024Threads16BytesPerThread16384Total.cso" }
+};
+
+struct CommandBufffer
+{
+	const GPUWorkload WorkloadType;
+	ComPtr<ID3D12CommandAllocator> CommandAllocator;
+	ComPtr<ID3D12GraphicsCommandList> CommandList;
+	ComPtr<ID3D12QueryHeap> QueryHeap;
+	ComPtr<ID3D12Fence> Fence;
+	HANDLE CPUEvent = nullptr;
+
+	CommandBufffer(GPUWorkload InWorkloadType, ComPtr<ID3D12Device> Device) : WorkloadType(InWorkloadType)
+	{
+		CheckHR(Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&CommandAllocator)));
+		CheckHR(Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&CommandList)));
+		CheckHR(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)));
+		CPUEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+
+		D3D12_QUERY_HEAP_DESC queryHeapDesc = {};
+		queryHeapDesc.Count = 1024;
+		queryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+		CheckHR(Device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&QueryHeap)));
+	}
+
+	void SubmitToQueueAndWait(ComPtr<ID3D12CommandQueue> CommandQueue, UINT64 FenceValueExpected, UINT64& GPUSubmitTime, UINT64& GPUCompleteTime)
+	{
+		// Get synced timer values for GPU and CPU
+		UINT64 GpuTimestamp;
+		UINT64 CpuTimestamp;
+ 		CheckHR(CommandQueue->GetClockCalibration(&GpuTimestamp, &CpuTimestamp));
+		if (WorkloadType == UploadToGPU)
+		{
+			GPUSubmitTime = GpuTimestamp;
+		}
+
+		// Submit GPU Work
+		ID3D12CommandList* const CommandListSubmission = CommandList.Get();
+		CommandQueue->ExecuteCommandLists(1, &CommandListSubmission);
+		CheckHR(CommandQueue->Signal(Fence.Get(), FenceValueExpected));
+
+		// Wait for GPU to complete
+		CheckHR(Fence->SetEventOnCompletion(FenceValueExpected, CPUEvent));
+		WaitForSingleObjectEx(CPUEvent, INFINITE, FALSE);
+
+		CheckHR(CommandQueue->GetClockCalibration(&GpuTimestamp, &CpuTimestamp));
+		if (WorkloadType == GPUToReadBack)
+		{
+			GPUCompleteTime = GpuTimestamp;
+		}
+
+		// Reset command list for next recording
+		CheckHR(CommandAllocator->Reset());
+		CheckHR(CommandList->Reset(CommandAllocator.Get(), nullptr));
+	}
 };
 
 struct D3D12TestScenario
@@ -118,14 +175,15 @@ struct D3D12TestScenario
 	enum class Type
 	{
 		CopyResource,
+		CopyBufferRegion,
 		ComputeShader
 	} ScenarioType = Type::CopyResource;
 	ComputeShader* ShaderPtr = nullptr;
 	
 	std::string get_scenario_name() const
 	{
-		std::string TestScenarioName = "CopyResource";
-		if (ScenarioType == D3D12TestScenario::Type::ComputeShader)
+		std::string TestScenarioName = ScenarioType == Type::CopyResource ? "CopyResource" : "CopyBufferRegion";
+		if (ScenarioType == Type::ComputeShader)
 		{
 			TestScenarioName = ShaderPtr->ShaderName;
 		}
@@ -133,18 +191,22 @@ struct D3D12TestScenario
 	}
 };
 
-void CopyResource(GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, ComPtr<ID3D12GraphicsCommandList> CommandList, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
+void CopyResource(const D3D12TestScenario& TestScenario, CommandBufffer& CommandBuffer, UINT64 BufferSize, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
 {
-	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 0));
+	const GPUWorkload WorkloadType = CommandBuffer.WorkloadType;
+	ComPtr<ID3D12QueryHeap>& QueryHeap = CommandBuffer.QueryHeap;
+	ComPtr<ID3D12GraphicsCommandList>& CommandList = CommandBuffer.CommandList;
+
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0);
 
 	{ // Barriers
 		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
 		UINT BarrierCount = 1;
-		if (Timestamp == UploadToGPU)
+		if (WorkloadType == UploadToGPU)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
 		}
-		else if (Timestamp == GPUToReadBack)
+		else if (WorkloadType == GPUToReadBack)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
 		}
@@ -157,16 +219,23 @@ void CopyResource(GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, Co
 		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
 	}
 
-	CommandList->CopyResource(Destination.Get(), Source.Get());
+	if (TestScenario.ScenarioType == D3D12TestScenario::Type::CopyBufferRegion)
+	{
+		CommandList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0, BufferSize);
+	}
+	else
+	{
+		CommandList->CopyResource(Destination.Get(), Source.Get());
+	}
 
 	{ // Barriers
 		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
 		UINT BarrierCount = 1;
-		if (Timestamp == UploadToGPU)
+		if (WorkloadType == UploadToGPU)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
 		}
-		else if (Timestamp == GPUToReadBack)
+		else if (WorkloadType == GPUToReadBack)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
 		}
@@ -179,21 +248,25 @@ void CopyResource(GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, Co
 		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
 	}
 
-	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 1));
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 1);
 }
 
-void CopyResourceCompute(UINT64 BufferSize, GPUTimestamps Timestamp, ComPtr<ID3D12QueryHeap> QueryHeap, ComPtr<ID3D12GraphicsCommandList> CommandList, ComputeShader& Shader, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
+void CopyResourceCompute(const D3D12TestScenario& TestScenario, CommandBufffer& CommandBuffer, UINT64 BufferSize, ComPtr<ID3D12Resource> Destination, ComPtr<ID3D12Resource> Source)
 {
-	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 0));
+	const GPUWorkload WorkloadType = CommandBuffer.WorkloadType;
+	ComPtr<ID3D12QueryHeap>& QueryHeap = CommandBuffer.QueryHeap;
+	ComPtr<ID3D12GraphicsCommandList>& CommandList = CommandBuffer.CommandList;
+
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0);
 
 	{ // Barriers
 		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
 		UINT BarrierCount = 1;
-		if (Timestamp == UploadToGPU)
+		if (WorkloadType == UploadToGPU)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		}
-		else if (Timestamp == GPUToReadBack)
+		else if (WorkloadType == GPUToReadBack)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		}
@@ -206,18 +279,19 @@ void CopyResourceCompute(UINT64 BufferSize, GPUTimestamps Timestamp, ComPtr<ID3D
 		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
 	}
 
-	{
-		CommandList->SetComputeRootSignature(Shader.RootSignature.Get());
-		CommandList->SetPipelineState(Shader.PipelineState.Get());
+	{		
+		ComputeShader* Shader = TestScenario.ShaderPtr;
+		CommandList->SetComputeRootSignature(Shader->RootSignature.Get());
+		CommandList->SetPipelineState(Shader->PipelineState.Get());
 		CommandList->SetComputeRootShaderResourceView(0, Source->GetGPUVirtualAddress());
 		CommandList->SetComputeRootUnorderedAccessView(1, Destination->GetGPUVirtualAddress());
 
-		if (BufferSize < Shader.CopySizePerDispatch) // Buffer size must be bigger than copy size per dispatch, otherwise it'll write off end.
+		if (BufferSize < Shader->CopySizePerDispatch) // Buffer size must be bigger than copy size per dispatch, otherwise it'll write off end.
 		{
 			CheckHR(E_FAIL);
 		}
 
-		const UINT DispatchSize = static_cast<UINT>(BufferSize / static_cast<UINT64>(Shader.CopySizePerDispatch)); // Can't exceed D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION
+		const UINT DispatchSize = static_cast<UINT>(BufferSize / static_cast<UINT64>(Shader->CopySizePerDispatch)); // Can't exceed D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION
 		CommandList->Dispatch(DispatchSize, 1, 1);
 	}
 
@@ -225,11 +299,11 @@ void CopyResourceCompute(UINT64 BufferSize, GPUTimestamps Timestamp, ComPtr<ID3D
 		CD3DX12_RESOURCE_BARRIER ResourceBarriers[2];
 		UINT BarrierCount = 1;
 
-		if (Timestamp == UploadToGPU)
+		if (WorkloadType == UploadToGPU)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Destination.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON);
 		}
-		else if (Timestamp == GPUToReadBack)
+		else if (WorkloadType == GPUToReadBack)
 		{
 			ResourceBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(Source.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
 		}
@@ -242,18 +316,12 @@ void CopyResourceCompute(UINT64 BufferSize, GPUTimestamps Timestamp, ComPtr<ID3D
 		CommandList->ResourceBarrier(BarrierCount, ResourceBarriers);
 	}
 
-	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, static_cast<UINT>((Timestamp * 2) + 1));
-}
-
-const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::milliseconds(5000);
-
-int main()
-{
-	d3d12();
+	CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 1);
 }
 
 void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSize, const D3D12TestScenario& TestScenario, TestResults& Results)
 {  
+	// TODO - Run a test when using memory calloted from a heap.
 	ComPtr<ID3D12Resource> GPUMemoryA;
 	ComPtr<ID3D12Resource> GPUMemoryB;
 	ComPtr<ID3D12Resource> UploadMemory;
@@ -298,16 +366,12 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 	}
 
 	ComPtr<ID3D12CommandQueue> CommandQueue;
-	ComPtr<ID3D12CommandAllocator> CommandAllocator;
-	ComPtr<ID3D12GraphicsCommandList> CommandList;
 	
 	D3D12_COMMAND_QUEUE_DESC CommandQueueDesc = {};
 	CommandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
 	CommandQueueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
 	CommandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 	CheckHR(Device->CreateCommandQueue(&CommandQueueDesc, IID_PPV_ARGS(&CommandQueue)));
-	CheckHR(Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&CommandAllocator)));
-	CheckHR(Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&CommandList)));
 
 	LARGE_INTEGER CPUFrequency;
 	QueryPerformanceFrequency(&CPUFrequency);
@@ -315,24 +379,14 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 	UINT64 GPUFrequency;
 	CommandQueue->GetTimestampFrequency(&GPUFrequency);
 
-	ComPtr<ID3D12QueryHeap> QueryHeap;
-	D3D12_QUERY_HEAP_DESC queryHeapDesc = {};
-	queryHeapDesc.Count = 1024;
-	queryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-	CheckHR(Device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&QueryHeap)));
+	std::unique_ptr<CommandBufffer> CommandBuffers[GPUWorkload::EnumMax];
+	for (size_t i = 0; i < GPUWorkload::EnumMax; i++)
+	{
+		CommandBuffers[i] = std::unique_ptr<CommandBufffer>(new CommandBufffer((GPUWorkload)i,Device));
+	}
 
-
-	ComPtr<ID3D12Fence> Fence;
-	CheckHR(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)));
-	HANDLE CPUEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-
-	// TODO - Move all these to be part of the DataCollected Enum to collect them to be exported
-	Average CPUTimeSubmission;
-	Average CPUTimeFenceWait;
-	Average CPUTimePreSubToAfterWait;
-	Average CPUSubmissionToGPUStarted;
-	Average CPUSubmissionToGPUEnded;
-	Average GPUStartedToGPUEnded;
+	Average CPUToGPUTrigger;
+	Average GPUToCPUTrigger;
 	Average GPUCopyUploadToGPU;
 	Average GPUCopyGPUToGPU;
 	Average GPUCopyGPUToReadback;
@@ -341,14 +395,14 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 	const std::chrono::steady_clock::time_point StartTime = std::chrono::steady_clock::now();
 	while ((std::chrono::steady_clock::now() - StartTime) < RUN_TIME_PER_TEST)
 	{
-		FenceValueExpected++;
-
 		if (TestScenario.ScenarioType == D3D12TestScenario::Type::ComputeShader)
 		{
 			if (TestScenario.ShaderPtr->CanCopyInSingleDispatch(GPUBufferSize) == false || TestScenario.ShaderPtr->CopySizePerDispatch > GPUBufferSize)
 			// Skip tests if we cannot satisfy them in a single dispatch call.
 			break;
 		}
+
+		FenceValueExpected++;
 
 		// Set UPLOAD memory to unique value
 		const int UniqueValue = rand();
@@ -365,64 +419,47 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 
 		// Command List Recording
 		{
-			CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (GPUTimestamps::AllGPUWork * 2) + 0);
+			if (TestScenario.ScenarioType == D3D12TestScenario::Type::ComputeShader)
 			{
-				if (TestScenario.ScenarioType == D3D12TestScenario::Type::ComputeShader)
-				{
-					// UploadToGPU
-					CopyResourceCompute(GPUBufferSize, GPUTimestamps::UploadToGPU, QueryHeap, CommandList, *TestScenario.ShaderPtr, GPUMemoryA, UploadMemory);
+				// UploadToGPU
+				CopyResourceCompute(TestScenario, *CommandBuffers[GPUWorkload::UploadToGPU], GPUBufferSize, GPUMemoryA, UploadMemory);
 
-					// GPUToGPU
-					CopyResourceCompute(GPUBufferSize, GPUTimestamps::GPUToGPU, QueryHeap, CommandList, *TestScenario.ShaderPtr, GPUMemoryB, GPUMemoryA);
-
-					// GPUToReadback (Can't bind READBACK as UAV so fall back to normal CopyResource)
-					CopyResource(GPUTimestamps::GPUToReadBack, QueryHeap, CommandList, ReadbackMemory, GPUMemoryB);
-				}
-				else if (TestScenario.ScenarioType == D3D12TestScenario::Type::CopyResource)
-				{
-					// UploadToGPU
-					CopyResource(GPUTimestamps::UploadToGPU, QueryHeap, CommandList, GPUMemoryA, UploadMemory);
-
-					// GPUToGPU
-					CopyResource(GPUTimestamps::GPUToGPU, QueryHeap, CommandList, GPUMemoryB, GPUMemoryA);
-
-					// GPUToReadback
-					CopyResource(GPUTimestamps::GPUToReadBack, QueryHeap, CommandList, ReadbackMemory, GPUMemoryB);
-				}
-				else
-				{
-					CheckHR(E_FAIL);
-				}
-
+				// GPUToGPU
+				CopyResourceCompute(TestScenario, *CommandBuffers[GPUWorkload::GPUToGPU], GPUBufferSize, GPUMemoryB, GPUMemoryA);
 			}
-			CommandList->EndQuery(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (GPUTimestamps::AllGPUWork * 2) + 1);
-			CommandList->ResolveQueryData(QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, GPUTimestamps::EnumMax * 2, QueryReadbackMemory.Get(), 0);
-			CommandList->Close();
+			else if (TestScenario.ScenarioType == D3D12TestScenario::Type::CopyResource || TestScenario.ScenarioType == D3D12TestScenario::Type::CopyBufferRegion)
+			{
+				// UploadToGPU
+				CopyResource(TestScenario, *CommandBuffers[GPUWorkload::UploadToGPU], GPUBufferSize, GPUMemoryA, UploadMemory);
+
+				// GPUToGPU
+				CopyResource(TestScenario, *CommandBuffers[GPUWorkload::GPUToGPU], GPUBufferSize, GPUMemoryB, GPUMemoryA);
+			}
+			else
+			{
+				CheckHR(E_FAIL);
+			}
+
+			// GPUToReadback (Can't bind READBACK as UAV so always is CopyResource
+			CopyResource(TestScenario, *CommandBuffers[GPUWorkload::GPUToReadBack], GPUBufferSize, ReadbackMemory, GPUMemoryB);
+
+			// Resolve Query Data
+			const int NumQueriesPerCB = 2;
+			int ReadbackMemoryOffset = 0;
+			for (auto& CB : CommandBuffers)
+			{
+				CB->CommandList->ResolveQueryData(CB->QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, NumQueriesPerCB, QueryReadbackMemory.Get(), ReadbackMemoryOffset);
+				CB->CommandList->Close();
+				ReadbackMemoryOffset += sizeof(UINT64) * NumQueriesPerCB;
+			}
 		}
 
-		// Get synced timer values for GPU and CPU
-		UINT64 GpuStartTimestamp;
-		UINT64 CpuStartTimestamp;
-		CheckHR(CommandQueue->GetClockCalibration(&GpuStartTimestamp, &CpuStartTimestamp));
-		
-		// Submit GPU Work
-		ID3D12CommandList* const CommandListSubmission = CommandList.Get();
-		CommandQueue->ExecuteCommandLists(1, &CommandListSubmission);
-		CheckHR(CommandQueue->Signal(Fence.Get(), FenceValueExpected));
-
-		LARGE_INTEGER CPUTimeAfterSubmission;
-		QueryPerformanceCounter(&CPUTimeAfterSubmission);
-
-		// Wait for GPU to complete
-		CheckHR(Fence->SetEventOnCompletion(FenceValueExpected, CPUEvent));
-		WaitForSingleObjectEx(CPUEvent, INFINITE, FALSE);
-
-		LARGE_INTEGER CPUTimeAfterSignalled;
-		QueryPerformanceCounter(&CPUTimeAfterSignalled);
-
-		// Reset command list for next recording
-		CheckHR(CommandAllocator->Reset());
-		CheckHR(CommandList->Reset(CommandAllocator.Get(), nullptr));
+		UINT64 GPUSubmitTime;
+		UINT64 GPUCompleteTime;
+		for (auto& CB : CommandBuffers)
+		{
+			CB->SubmitToQueueAndWait(CommandQueue, FenceValueExpected, GPUSubmitTime, GPUCompleteTime);
+		}
 
 		// Ensure our input matches our output (Ensure UPLOAD memory is identical to the READBACK)
 		{
@@ -437,7 +474,7 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 				{
 					std::cout << "ERROR: READBACK Memory does not match UPLOAD memory.\n";
 					std::cout << "Expecting: " << UniqueValue << " Encountered: " << MappedPointerValue << "\n";
-					__debugbreak();
+					CheckHR(E_FAIL);
 				}
 			}
 			Range.End = 0;
@@ -446,52 +483,42 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 
 		// Collect timing data
 		{
-			D3D12_RANGE Range = { 0, sizeof(UINT64) * GPUTimestamps::EnumMax * 2 };
+			D3D12_RANGE Range = { 0, sizeof(UINT64) * GPUWorkload::EnumMax * 2 };
 			UINT64* QueryReadbackMemoryPtr;
 			QueryReadbackMemory->Map(0, &Range, (void**)&QueryReadbackMemoryPtr);
 			{
-				UINT64 GPUStartTime = QueryReadbackMemoryPtr[(GPUTimestamps::AllGPUWork * 2) + 0];
-				UINT64 GPUEndTime = QueryReadbackMemoryPtr[(GPUTimestamps::AllGPUWork * 2) + 1];
+				CPUToGPUTrigger += QueryReadbackMemoryPtr[(GPUWorkload::UploadToGPU * 2) + 0] - GPUSubmitTime;
+				GPUToCPUTrigger += GPUCompleteTime - QueryReadbackMemoryPtr[(GPUWorkload::GPUToReadBack * 2) + 1];
 
-				CPUTimeSubmission += CPUTimeAfterSubmission.QuadPart - CpuStartTimestamp;
-				CPUTimeFenceWait += CPUTimeAfterSignalled.QuadPart - CPUTimeAfterSubmission.QuadPart;
-				CPUTimePreSubToAfterWait += CPUTimeAfterSignalled.QuadPart - CpuStartTimestamp;
-
-				CPUSubmissionToGPUStarted += GPUStartTime - GpuStartTimestamp;
-				CPUSubmissionToGPUEnded += GPUEndTime - GpuStartTimestamp;
-				GPUStartedToGPUEnded += GPUEndTime - GPUStartTime;
-
-				GPUCopyUploadToGPU += QueryReadbackMemoryPtr[(GPUTimestamps::UploadToGPU * 2) + 1] - QueryReadbackMemoryPtr[(GPUTimestamps::UploadToGPU * 2) + 0];
-				GPUCopyGPUToGPU += QueryReadbackMemoryPtr[(GPUTimestamps::GPUToGPU * 2) + 1] - QueryReadbackMemoryPtr[(GPUTimestamps::GPUToGPU * 2) + 0];
-				GPUCopyGPUToReadback += QueryReadbackMemoryPtr[(GPUTimestamps::GPUToReadBack * 2) + 1] - QueryReadbackMemoryPtr[(GPUTimestamps::GPUToReadBack * 2) + 0];
+				GPUCopyUploadToGPU += QueryReadbackMemoryPtr[(GPUWorkload::UploadToGPU * 2) + 1] - QueryReadbackMemoryPtr[(GPUWorkload::UploadToGPU * 2) + 0];
+				GPUCopyGPUToGPU += QueryReadbackMemoryPtr[(GPUWorkload::GPUToGPU * 2) + 1] - QueryReadbackMemoryPtr[(GPUWorkload::GPUToGPU * 2) + 0];
+				GPUCopyGPUToReadback += QueryReadbackMemoryPtr[(GPUWorkload::GPUToReadBack * 2) + 1] - QueryReadbackMemoryPtr[(GPUWorkload::GPUToReadBack * 2) + 0];
 			}
 			QueryReadbackMemory->Unmap(0, nullptr);
 		}
 	}
 	std::cout << std::format("Timing Results: Run Count: {:<6} Memory Size: {}\n", FenceValueExpected, PrettifyMemorySize(GPUBufferSize));
-	std::cout << "CPU Submission Time (us):                        " << (static_cast<float>((CPUTimeSubmission.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
-	std::cout << "CPU Fence Wait  (us):                            " << (static_cast<float>((CPUTimeFenceWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
-	std::cout << "CPU Before Submission To After Signal Wait (us): " << (static_cast<float>((CPUTimePreSubToAfterWait.calculate_average()) * 1000000) / static_cast<float>(CPUFrequency.QuadPart)) << "\n";
 
-	std::cout << "CPU Submission to GPU Started (us): " << (static_cast<float>((CPUSubmissionToGPUStarted.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
-	std::cout << "CPU Submission to GPU Ended (us):   " << (static_cast<float>((CPUSubmissionToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
-	std::cout << "GPU Started To GPU Ended (us):      " << (static_cast<float>((GPUStartedToGPUEnded.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency)) << "\n";
+	const float CPUToGPUTriggerTime = Results[(size_t)DataCollected::CPUToGPUResponse_Time] = (static_cast<float>((CPUToGPUTrigger.CalculateAverage()) * 1000000) / static_cast<float>(GPUFrequency));
+	const float GPUToCPUTriggerTime = Results[(size_t)DataCollected::GPUToCPUResponseTime] = (static_cast<float>((GPUToCPUTrigger.CalculateAverage()) * 1000000) / static_cast<float>(GPUFrequency));
+	std::cout << "CPU Submission to GPU Started (us): " << CPUToGPUTriggerTime << "\n";
+	std::cout << "GPU Finished to CPU Woken (us):     " << GPUToCPUTriggerTime << "\n";
 
-	float CopyUploadToGPUTime = Results[(size_t)DataCollected::UploadToGPU_Time] = (static_cast<float>((GPUCopyUploadToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
-	float CopyUploadToGPUGBs = Results[(size_t)DataCollected::UploadToGPU_Speed] = 1000000.0f / (CopyUploadToGPUTime * GPUBuffer1GBRatio);
+	const float CopyUploadToGPUTime = Results[(size_t)DataCollected::UploadToGPU_Time] = (static_cast<float>((GPUCopyUploadToGPU.CalculateAverage()) * 1000000) / static_cast<float>(GPUFrequency));
+	const float CopyUploadToGPUGBs = Results[(size_t)DataCollected::UploadToGPU_Speed] = 1000000.0f / (CopyUploadToGPUTime * GPUBuffer1GBRatio);
 	std::cout << std::format("GPU Copy Upload To GPU (us):   {:6.1f} ({:5.1f} GiB/s)\n", CopyUploadToGPUTime, CopyUploadToGPUGBs);
 
-	float CopyGPUToGPUTime = Results[(size_t)DataCollected::GPUToGPU_Time] = (static_cast<float>((GPUCopyGPUToGPU.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
-	float CopyGPUToGPUGBs = Results[(size_t)DataCollected::GPUToGPU_Speed] = 1000000.0f / (CopyGPUToGPUTime * GPUBuffer1GBRatio);
+	const float CopyGPUToGPUTime = Results[(size_t)DataCollected::GPUToGPU_Time] = (static_cast<float>((GPUCopyGPUToGPU.CalculateAverage()) * 1000000) / static_cast<float>(GPUFrequency));
+	const float CopyGPUToGPUGBs = Results[(size_t)DataCollected::GPUToGPU_Speed] = 1000000.0f / (CopyGPUToGPUTime * GPUBuffer1GBRatio);
 	std::cout << std::format("GPU Copy GPU To GPU (us):      {:6.1f} ({:5.1f} GiB/s)\n", CopyGPUToGPUTime, CopyGPUToGPUGBs);
 
-	float CopyGPUToReadbackTime = Results[(size_t)DataCollected::GPUToReadback_Time] = (static_cast<float>((GPUCopyGPUToReadback.calculate_average()) * 1000000) / static_cast<float>(GPUFrequency));
-	float CopyGPUToReadbackGBs = Results[(size_t)DataCollected::GPUToReadback_Speed] = 1000000.0f / (CopyGPUToReadbackTime * GPUBuffer1GBRatio);
+	const float CopyGPUToReadbackTime = Results[(size_t)DataCollected::GPUToReadback_Time] = (static_cast<float>((GPUCopyGPUToReadback.CalculateAverage()) * 1000000) / static_cast<float>(GPUFrequency));
+	const float CopyGPUToReadbackGBs = Results[(size_t)DataCollected::GPUToReadback_Speed] = 1000000.0f / (CopyGPUToReadbackTime * GPUBuffer1GBRatio);
 	std::cout << std::format("GPU Copy GPU To Readback (us): {:6.1f} ({:5.1f} GiB/s)\n", CopyGPUToReadbackTime, CopyGPUToReadbackGBs);
 
 }
 
-void d3d12_run_test_scenario(ComPtr<ID3D12Device>& Device, const std::vector<UINT64>& MemorySizes, D3D12TestScenario TestScenario, ResultsPerMemorySize& ResultsList)
+void RunTestScenario(ComPtr<ID3D12Device>& Device, const std::vector<UINT64>& MemorySizes, D3D12TestScenario TestScenario, ResultsPerMemorySize& ResultsList)
 {
 	std::cout << "\nStarting Test Scenario: " << TestScenario.get_scenario_name() << "\n";
 
@@ -504,7 +531,7 @@ void d3d12_run_test_scenario(ComPtr<ID3D12Device>& Device, const std::vector<UIN
 	}
 }
 
-void d3d12()
+int main()
 {
 #ifdef _DEBUG
 	// Enable the D3D12 debug layer.
@@ -526,6 +553,8 @@ void d3d12()
 	ComPtr<ID3D12Device> Device;
 	CheckHR(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&Device)));
 
+	CheckHR(Device->SetStablePowerState(TRUE));
+
 	D3D12_FEATURE_DATA_ARCHITECTURE1 DataArchitecture1 = {};
 	CheckHR(Device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &DataArchitecture1, sizeof(DataArchitecture1)));
 
@@ -539,40 +568,42 @@ void d3d12()
 		1024,
 		1024 * 4,
 		1024 * 8,
- 		1024 * 16,
+		1024 * 16,
 		1024 * 32,
- 		1024 * 64, 
+		1024 * 64,
 		1024 * 128,
- 		1024 * 256,
+		1024 * 256,
 		1024 * 384,
- 		1024 * 512, 
+		1024 * 512,
 		1024 * 768,
- 		1024 * 1024 * 1, 
- 		1024 * 1024 * 2, 
+		1024 * 1024 * 1,
+		1024 * 1024 * 2,
 		1024 * 1024 * 3,
- 		1024 * 1024 * 4, 
+		1024 * 1024 * 4,
 		1024 * 1024 * 6,
- 		1024 * 1024 * 8, 
+		1024 * 1024 * 8,
 		1024 * 1024 * 12,
- 		1024 * 1024 * 16, 
+		1024 * 1024 * 16,
 		1024 * 1024 * 20,
-		1024 * 1024 * 24, 
- 		1024 * 1024 * 32, 
+		1024 * 1024 * 24,
+		1024 * 1024 * 32,
 		1024 * 1024 * 48,
 		1024 * 1024 * 64,
 		1024 * 1024 * 96,
 		1024 * 1024 * 128,
 		1024 * 1024 * 256,
 		1024 * 1024 * 512,
- 		1024 * 1024 * 1024
+		1024 * 1024 * 1024
 	};
 
 	std::vector<D3D12TestScenario> TestScenarios;
 	{
 		D3D12TestScenario TestScenario;
 
-		// Copy Resource Test
 		TestScenario.ScenarioType = D3D12TestScenario::Type::CopyResource;
+		TestScenarios.push_back(TestScenario);
+
+		TestScenario.ScenarioType = D3D12TestScenario::Type::CopyBufferRegion;
 		TestScenarios.push_back(TestScenario);
 
 		// Compute Shader Tests
@@ -589,7 +620,7 @@ void d3d12()
 
 	for (D3D12TestScenario& TestScenario : TestScenarios)
 	{
-		d3d12_run_test_scenario(Device, MemorySizes, TestScenario, FullResults);
+		RunTestScenario(Device, MemorySizes, TestScenario, FullResults);
 	}
 
 	// Write out results to CSV
@@ -632,11 +663,6 @@ void d3d12()
 				OutWriteFile << "," << Results[iDataIndex];
 			}
 			OutWriteFile << "\n";
-		}
-
-		for (const auto& Scenario : TestScenarios)
-		{
-
 		}
 	}
 }
