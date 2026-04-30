@@ -10,7 +10,7 @@
 using namespace Microsoft::WRL;
 
 #define CheckHR(x) { HRESULT __hr = x; if (FAILED(__hr)) { std::cout<< "HR FAILURE: " << __hr << "\n"; __debugbreak(); } }
-const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::milliseconds(2000);
+const std::chrono::duration RUN_TIME_PER_TEST = std::chrono::milliseconds(5000);
 
 struct Average
 {
@@ -227,7 +227,7 @@ struct D3D12TestScenario
 	} ScenarioType = Type::CopyResource;
 	ComputeShader* ShaderPtr = nullptr;
 	
-	std::string get_scenario_name() const
+	std::string GetScenarioName() const
 	{
 		std::string TestScenarioName = ScenarioType == Type::CopyResource ? "CopyResource" : "CopyBufferRegion";
 		if (ScenarioType == Type::ComputeShader)
@@ -364,7 +364,7 @@ void CopyResourceCompute(const D3D12TestScenario& TestScenario, CommandBufffer& 
 	CommandBuffer.QueryEnd();
 }
 
-void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSize, const D3D12TestScenario& TestScenario, TestResults& Results)
+void D3D12RunMemoryTest(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSize, const D3D12TestScenario& TestScenario, TestResults& Results)
 {  
 	// TODO - Run a test when using memory calloted from a heap.
 	ComPtr<ID3D12Resource> GPUMemoryA;
@@ -564,13 +564,13 @@ void d3d12_run_memory_test(ComPtr<ID3D12Device> Device, const UINT64 GPUBufferSi
 
 void RunTestScenario(ComPtr<ID3D12Device>& Device, const std::vector<UINT64>& MemorySizes, D3D12TestScenario TestScenario, ResultsPerMemorySize& ResultsList)
 {
-	std::cout << "\nStarting Test Scenario: " << TestScenario.get_scenario_name() << "\n";
+	std::cout << "\nStarting Test Scenario: " << TestScenario.GetScenarioName() << "\n";
 
 	for (size_t i = 0; i < MemorySizes.size(); i++)
 	{
 		const UINT64 MemorySize = MemorySizes[i];
 		TestResults Results;
-		d3d12_run_memory_test(Device, MemorySize, TestScenario, Results);
+		D3D12RunMemoryTest(Device, MemorySize, TestScenario, Results);
 		ResultsList[i].push_back(Results);
 	}
 }
@@ -696,7 +696,7 @@ int main()
 				OutWriteFile << "Memory Size Bytes, Memory Size";
 				for (const D3D12TestScenario& TestScenario : TestScenarios)
 				{
-					OutWriteFile << "," << TestScenario.get_scenario_name() << "-" << DataCollectionName;
+					OutWriteFile << "," << TestScenario.GetScenarioName() << "-" << DataCollectionName;
 				}
 
 				OutWriteFile << "\n";
